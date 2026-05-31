@@ -141,6 +141,26 @@ class OverlayWindow(QWidget):
         )
         layout.addWidget(self.ram_bar)
 
+        temp_row = QHBoxLayout()
+        temp_row.setContentsMargins(0, 0, 0, 0)
+        temp_label = QLabel("TEMP")
+        temp_label.setStyleSheet(f"font-family: '{font_family}'; font-size: 11px; color: rgba(255,255,255,200);")
+        temp_row.addWidget(temp_label)
+        temp_row.addStretch()
+        self.temp_value = QLabel("--")
+        self.temp_value.setStyleSheet(f"font-family: '{font_family}'; font-size: 11px; font-weight: bold; color: #ff9800;")
+        temp_row.addWidget(self.temp_value)
+        layout.addLayout(temp_row)
+
+        self.temp_bar = QProgressBar()
+        self.temp_bar.setFixedHeight(3)
+        self.temp_bar.setTextVisible(False)
+        self.temp_bar.setStyleSheet(
+            "QProgressBar { background: rgba(255,255,255,20); border-radius: 1px; }"
+            "QProgressBar::chunk { background: #ff9800; border-radius: 1px; }"
+        )
+        layout.addWidget(self.temp_bar)
+
         sep2 = QLabel()
         sep2.setFixedHeight(1)
         sep2.setStyleSheet("background: rgba(255,255,255,25);")
@@ -201,6 +221,24 @@ class OverlayWindow(QWidget):
             pct = ram.percent
             self.ram_bar.setValue(int(pct))
             self.ram_value.setText(f"{pct:.0f}%")
+        except Exception:
+            pass
+
+        try:
+            temps = psutil.sensors_temperatures()
+            if temps:
+                cpu_keys = ["coretemp", "cpu_thermal", "k10temp", "cpu"]
+                best = None
+                for key in cpu_keys:
+                    if key in temps and temps[key]:
+                        best = max(best or 0, temps[key][0].current)
+                if best is None:
+                    for entries in temps.values():
+                        if entries:
+                            best = max(best or 0, entries[0].current)
+                if best is not None:
+                    self.temp_bar.setValue(min(int(best), 100))
+                    self.temp_value.setText(f"{best:.0f}°C")
         except Exception:
             pass
 
