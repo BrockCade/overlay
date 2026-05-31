@@ -1,15 +1,61 @@
 import json
 import datetime
+import ctypes
+from ctypes import c_int, c_short, c_ushort, c_void_p, POINTER, Structure
 from pathlib import Path
 import psutil
-from PySide6.QtCore import Qt, QTimer, QRect, QSize, QEvent
+from PySide6.QtCore import Qt, QTimer, QRect
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QProgressBar, QHBoxLayout
 from PySide6.QtGui import QPainter, QColor, QPen
 
 
-class OverlayWindow(QWidget):
-    _DRAGGABLE_WIDGETS = []
+_X11 = None
+_Xext = None
+_X11_DISPLAY = None
 
+
+class _XRectangle(Structure):
+    _fields_ = [
+        ("x", c_short),
+        ("y", c_short),
+        ("width", c_ushort),
+        ("height", c_ushort),
+    ]
+
+
+def _x11_init():
+    global _X11, _Xext
+    if _X11 is not None:
+        return True
+    try:
+        _X11 = ctypes.cdll.LoadLibrary("libX11.so.6")
+        _X11.XOpenDisplay.restype = c_void_p
+        _X11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        _X11.XCloseDisplay.restype = c_int
+        _X11.XCloseDisplay.argtypes = [c_void_p]
+        _X11.XFlush.restype = c_int
+        _X11.XFlush.argtypes = [c_void_p]
+
+        _Xext = ctypes.cdll.LoadLibrary("libXext.so.6")
+        _Xext.XShapeCombineRectangles.restype = None
+        _Xext.XShapeCombineRectangles.argtypes = [
+            c_void_p, c_ulong, c_int, c_int, c_int,
+            POINTER(_XRectangle), c_int, c_int, c_int,
+        ]
+        return True
+    except Exception:
+        _X11 = _Xext = None
+        return False
+
+
+def _x11_display():
+    global _X11_DISPLAY
+    if _X11_DISPLAY is None and _x11_init():
+        _X11_DISPLAY = _X11.XOpenDisplay(None)
+    return _X11_DISPLAY
+
+
+class OverlayWindow(QWidget):
     def __init__(self, config_path):
         super().__init__()
         self.config_path = config_path
@@ -27,10 +73,8 @@ class OverlayWindow(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         self._setup_ui()
-        self._make_draggable()
         self._setup_timers()
 
         pos = self.config.get("position", {"x": 100, "y": 100})
@@ -58,6 +102,15 @@ class OverlayWindow(QWidget):
         self._update_custom_text()
         interval = max(1, self.config.get("refresh_interval_seconds", 2)) * 1000
         self.stats_timer.setInterval(interval)
+        self._update_input_shape()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._update_input_shape()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_input_shape()
 
     def _setup_ui(self):
         font_family = self.config.get("font_family", "sans-serif")
@@ -174,38 +227,13 @@ class OverlayWindow(QWidget):
         layout.addWidget(self.version_label)
 
         self.setLayout(layout)
-
-    def _make_draggable(self):
-        names = [
-            "time_label", "date_label", "cpu_value", "ram_value", "temp_value",
-            "cpu_bar", "ram_bar", "temp_bar", "quote_label", "version_label",
+        self._content_widgets = [
+            self.time_label, self.date_label,
+            self.cpu_value, self.cpu_bar,
+            self.ram_value, self.ram_bar,
+            self.temp_value, self.temp_bar,
+            self.quote_label, self.version_label,
         ]
-        for name in names:
-            w = getattr(self, name, None)
-            if w is not None:
-                w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-                w.installEventFilter(self)
-
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.MouseButtonPress:
-            if event.button() == Qt.MouseButton.LeftButton:
-                self._moving = True
-                self._drag_start_pos = event.globalPosition().toPoint() - self.pos()
-                self.update()
-                return True
-        elif event.type() == QEvent.Type.MouseMove:
-            if self._moving:
-                self.move(event.globalPosition().toPoint() - self._drag_start_pos)
-                self.update()
-                return True
-        elif event.type() == QEvent.Type.MouseButtonRelease:
-            if self._moving:
-                self._moving = False
-                self._drag_start_pos = None
-                self.update()
-                self._save_config()
-                return True
-        return super().eventFilter(obj, event)
 
     def _setup_timers(self):
         self.clock_timer = QTimer(self)
@@ -226,6 +254,7 @@ class OverlayWindow(QWidget):
         else:
             self.time_label.setText(now.strftime("%I:%M:%S %p").lstrip("0"))
         self.date_label.setText(now.strftime("%A, %B %d, %Y"))
+        self._update_input_shape()
 
     def _update_stats(self):
         try:
@@ -258,13 +287,72 @@ class OverlayWindow(QWidget):
         except Exception:
             pass
 
+        self._update_input_shape()
+
     def _update_custom_text(self):
         self.quote_label.setText(self.config.get("custom_text", ""))
+        self._update_input_shape()
 
     def toggle_time_format(self, *args):
         self.time_format_24h = not self.time_format_24h
         self._update_clock()
         self._save_config()
+
+    def _content_rects(self):
+        rects = []
+        for w in self._content_widgets:
+            if not w.isVisible():
+                continue
+            g = w.geometry()
+            if isinstance(w, QProgressBar):
+                rects.append((g.x(), g.y(), g.width(), g.height()))
+                continue
+            text = w.text().strip()
+            if not text:
+                continue
+            if w.wordWrap():
+                rects.append((g.x(), g.y(), g.width(), g.height()))
+                continue
+            br = w.fontMetrics().boundingRect(text)
+            tw, th = br.width(), br.height()
+            if tw >= g.width() - 4:
+                rects.append((g.x(), g.y(), g.width(), g.height()))
+                continue
+            align = w.alignment()
+            if align & Qt.AlignmentFlag.AlignCenter:
+                rx = g.x() + (g.width() - tw) // 2
+            elif align & Qt.AlignmentFlag.AlignRight:
+                rx = g.right() - tw
+            else:
+                rx = g.x()
+            ry = g.y() + (g.height() - th) // 2
+            rects.append((rx, ry, tw, th))
+        return rects
+
+    def _update_input_shape(self):
+        if not self.isVisible():
+            return
+        display = _x11_display()
+        if display is None:
+            return
+        display_p = ctypes.c_void_p(display)
+        raw_rects = self._content_rects()
+        if not raw_rects:
+            return
+        xrects = (_XRectangle * len(raw_rects))()
+        for i, (x, y, w, h) in enumerate(raw_rects):
+            xrects[i] = _XRectangle(x, y, w, h)
+        _Xext.XShapeCombineRectangles(
+            display_p,
+            ctypes.c_ulong(self.winId()),
+            0,  # ShapeInput
+            0, 0,  # x_off, y_off
+            xrects,
+            len(raw_rects),
+            0,  # ShapeSet
+            2,  # YXBanded
+        )
+        _X11.XFlush(display_p)
 
     def paintEvent(self, event):
         if self._moving:
@@ -273,3 +361,23 @@ class OverlayWindow(QWidget):
             painter.setPen(QPen(QColor(255, 255, 255, 100), 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 6, 6)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._moving = True
+            self._drag_start_pos = event.globalPosition().toPoint() - self.pos()
+            self.update()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self._moving:
+            self.move(event.globalPosition().toPoint() - self._drag_start_pos)
+            self.update()
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._moving:
+            self._moving = False
+            self._drag_start_pos = None
+            self.update()
+            self._save_config()
