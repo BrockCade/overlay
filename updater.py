@@ -83,11 +83,17 @@ def apply_update(target_dir=None):
             check=True, timeout=30, cwd=target_dir
         )
 
+        pulled_version = None
+        version_file = Path(target_dir) / "version.txt"
+        if version_file.exists():
+            pulled_version = version_file.read_text().strip()
+
         if has_uncommitted:
             subprocess.run(["git", "stash", "pop"], check=False, timeout=10, cwd=target_dir)
+            if pulled_version:
+                version_file.write_text(pulled_version)
 
-        version_file = Path(target_dir) / "version.txt"
-        new_version = version_file.read_text().strip() if version_file.exists() else "?"
+        new_version = pulled_version or "?"
         return {"success": True, "updated": True, "version": new_version}
 
     except subprocess.CalledProcessError as e:
