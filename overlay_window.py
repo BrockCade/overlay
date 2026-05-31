@@ -2,28 +2,13 @@ import json
 import datetime
 from pathlib import Path
 import psutil
-from PySide6.QtCore import Qt, QTimer, QRect, QSize
+from PySide6.QtCore import Qt, QTimer, QRect, QSize, QEvent
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QProgressBar, QHBoxLayout
-from PySide6.QtGui import QPainter, QColor, QPen, QImage
+from PySide6.QtGui import QPainter, QColor, QPen
 
 
 class OverlayWindow(QWidget):
-    RESIZE_MARGIN = 8
-    EDGE_TOP = 1
-    EDGE_BOTTOM = 2
-    EDGE_LEFT = 4
-    EDGE_RIGHT = 8
-
-    _EDGE_CURSORS = {
-        EDGE_TOP: Qt.CursorShape.SizeVerCursor,
-        EDGE_BOTTOM: Qt.CursorShape.SizeVerCursor,
-        EDGE_LEFT: Qt.CursorShape.SizeHorCursor,
-        EDGE_RIGHT: Qt.CursorShape.SizeHorCursor,
-        EDGE_TOP | EDGE_LEFT: Qt.CursorShape.SizeFDiagCursor,
-        EDGE_BOTTOM | EDGE_RIGHT: Qt.CursorShape.SizeFDiagCursor,
-        EDGE_TOP | EDGE_RIGHT: Qt.CursorShape.SizeBDiagCursor,
-        EDGE_BOTTOM | EDGE_LEFT: Qt.CursorShape.SizeBDiagCursor,
-    }
+    _DRAGGABLE_WIDGETS = []
 
     def __init__(self, config_path):
         super().__init__()
@@ -32,9 +17,7 @@ class OverlayWindow(QWidget):
 
         self.time_format_24h = self.config.get("time_format_24h", False)
 
-        self._resizing = 0
         self._moving = False
-        self._drag_start = None
         self._drag_start_pos = None
 
         self.setWindowFlags(
@@ -44,9 +27,10 @@ class OverlayWindow(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         self._setup_ui()
+        self._make_draggable()
         self._setup_timers()
 
         pos = self.config.get("position", {"x": 100, "y": 100})
@@ -191,6 +175,38 @@ class OverlayWindow(QWidget):
 
         self.setLayout(layout)
 
+    def _make_draggable(self):
+        names = [
+            "time_label", "date_label", "cpu_value", "ram_value", "temp_value",
+            "cpu_bar", "ram_bar", "temp_bar", "quote_label", "version_label",
+        ]
+        for name in names:
+            w = getattr(self, name, None)
+            if w is not None:
+                w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+                w.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.MouseButtonPress:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._moving = True
+                self._drag_start_pos = event.globalPosition().toPoint() - self.pos()
+                self.update()
+                return True
+        elif event.type() == QEvent.Type.MouseMove:
+            if self._moving:
+                self.move(event.globalPosition().toPoint() - self._drag_start_pos)
+                self.update()
+                return True
+        elif event.type() == QEvent.Type.MouseButtonRelease:
+            if self._moving:
+                self._moving = False
+                self._drag_start_pos = None
+                self.update()
+                self._save_config()
+                return True
+        return super().eventFilter(obj, event)
+
     def _setup_timers(self):
         self.clock_timer = QTimer(self)
         self.clock_timer.timeout.connect(self._update_clock)
@@ -250,113 +266,10 @@ class OverlayWindow(QWidget):
         self._update_clock()
         self._save_config()
 
-    def _resize_edge(self, pos):
-        rect = self.rect()
-        edges = 0
-        if pos.x() <= self.RESIZE_MARGIN:
-            edges |= self.EDGE_LEFT
-        if pos.x() >= rect.width() - self.RESIZE_MARGIN:
-            edges |= self.EDGE_RIGHT
-        if pos.y() <= self.RESIZE_MARGIN:
-            edges |= self.EDGE_TOP
-        if pos.y() >= rect.height() - self.RESIZE_MARGIN:
-            edges |= self.EDGE_BOTTOM
-        return edges
-
     def paintEvent(self, event):
-        if self._resizing or self._moving:
+        if self._moving:
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             painter.setPen(QPen(QColor(255, 255, 255, 100), 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 6, 6)
-
-    def _hit_content(self, pos):
-        for w in self.findChildren(QLabel) + self.findChildren(QProgressBar):
-            rect = w.geometry()
-            if not rect.contains(pos):
-                continue
-            if isinstance(w, QProgressBar):
-                return True
-            text = w.text().strip()
-            if not text:
-                continue
-            br = w.fontMetrics().boundingRect(text)
-            if br.width() < rect.width():
-                if w.alignment() & Qt.AlignmentFlag.AlignCenter:
-                    br.moveCenter(rect.center())
-                else:
-                    br.moveTopLeft(rect.topLeft())
-                if br.contains(pos):
-                    return True
-            else:
-                return True
-        return False
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            if not self._hit_content(event.position().toPoint()):
-                event.ignore()
-                return
-            edge = self._resize_edge(event.position().toPoint())
-            if edge:
-                self._resizing = edge
-                self._drag_start = event.globalPosition().toPoint()
-                self._start_geo = self.geometry()
-            else:
-                self._moving = True
-                self._drag_start_pos = event.globalPosition().toPoint() - self.pos()
-            self.update()
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        pos = event.globalPosition().toPoint()
-
-        if self._resizing:
-            dx = pos.x() - self._drag_start.x()
-            dy = pos.y() - self._drag_start.y()
-            sg = self._start_geo
-            l, t, r, b = sg.left(), sg.top(), sg.right(), sg.bottom()
-
-            if self._resizing & self.EDGE_LEFT:
-                l = sg.left() + dx
-            if self._resizing & self.EDGE_RIGHT:
-                r = sg.right() + dx
-            if self._resizing & self.EDGE_TOP:
-                t = sg.top() + dy
-            if self._resizing & self.EDGE_BOTTOM:
-                b = sg.bottom() + dy
-
-            min_w, min_h = 150, 100
-            if r - l < min_w:
-                if self._resizing & self.EDGE_LEFT:
-                    l = r - min_w
-                else:
-                    r = l + min_w
-            if b - t < min_h:
-                if self._resizing & self.EDGE_TOP:
-                    t = b - min_h
-                else:
-                    b = t + min_h
-
-            self.setGeometry(l, t, r - l, b - t)
-            self.update()
-            event.accept()
-        elif self._moving:
-            self.move(pos - self._drag_start_pos)
-            self.update()
-            event.accept()
-        else:
-            edge = self._resize_edge(event.position().toPoint())
-            self.setCursor(self._EDGE_CURSORS.get(edge, Qt.CursorShape.ArrowCursor))
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            was_dragging = self._resizing or self._moving
-            self._resizing = 0
-            self._moving = False
-            self._drag_start = None
-            self._drag_start_pos = None
-            self.update()
-            if was_dragging:
-                self._save_config()
