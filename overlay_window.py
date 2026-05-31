@@ -272,6 +272,10 @@ class OverlayWindow(QWidget):
             painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 6, 6)
 
     def mousePressEvent(self, event):
+        child = self.childAt(event.position().toPoint())
+        if child is None or child is self:
+            event.ignore()
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             edge = self._resize_edge(event.position().toPoint())
             if edge:
