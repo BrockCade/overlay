@@ -1,50 +1,23 @@
-import os
 import sys
 import json
 import base64
-import shutil
+import urllib.request
+import urllib.error
 import subprocess
 from pathlib import Path
 
 
-_GH_PATH = None
+_API_URL = "https://api.github.com"
 
 
-def _find_gh():
-    gh = shutil.which("gh")
-    if gh:
-        return gh
-    candidates = [
-        "/usr/bin/gh",
-        "/usr/local/bin/gh",
-        "/home/linuxbrew/.linuxbrew/bin/gh",
-    ]
-    for c in candidates:
-        if os.path.isfile(c):
-            try:
-                r = subprocess.run([c, "--version"], capture_output=True, text=True, timeout=5)
-                if r.returncode == 0:
-                    return c
-            except FileNotFoundError:
-                continue
-    return None
-
-
-def _gh(args):
-    global _GH_PATH
-    if _GH_PATH is None:
-        _GH_PATH = _find_gh()
-        if _GH_PATH is None:
-            return None
+def _api_get(path):
+    url = f"{_API_URL}{path}"
+    req = urllib.request.Request(url)
+    req.add_header("Accept", "application/vnd.github.v3+json")
     try:
-        result = subprocess.run(
-            [_GH_PATH] + args,
-            capture_output=True, text=True, timeout=15
-        )
-        if result.returncode != 0:
-            return None
-        return result.stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode())
+    except (urllib.error.HTTPError, urllib.error.URLError, OSError):
         return None
 
 
@@ -57,11 +30,11 @@ def get_current_version():
 
 
 def check_remote_version(owner, repo, branch="ai"):
-    data = _gh(["api", f"repos/{owner}/{repo}/contents/version.txt?ref={branch}", "--jq", ".content"])
-    if data is None:
+    data = _api_get(f"/repos/{owner}/{repo}/contents/version.txt?ref={branch}")
+    if data is None or "content" not in data:
         return None
     try:
-        return base64.b64decode(data).decode().strip()
+        return base64.b64decode(data["content"]).decode().strip()
     except Exception:
         return None
 
