@@ -1,5 +1,6 @@
 import json
 import datetime
+from pathlib import Path
 import psutil
 from PySide6.QtCore import Qt, QTimer, QRect
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QProgressBar, QHBoxLayout
@@ -150,6 +151,19 @@ class OverlayWindow(QWidget):
         )
         self.quote_label.setText(self.config.get("custom_text", ""))
         layout.addWidget(self.quote_label)
+
+        ver = "?"
+        try:
+            ver = Path(__file__).resolve().parent.joinpath("version.txt").read_text().strip()
+        except Exception:
+            pass
+        self.version_label = QLabel(f"v{ver}")
+        self.version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.version_label.setStyleSheet(
+            f"font-family: '{font_family}'; font-size: 9px; color: rgba(255,255,255,60);"
+        )
+        self.version_label.setContentsMargins(0, 4, 0, 0)
+        layout.addWidget(self.version_label)
 
         self.setLayout(layout)
 
