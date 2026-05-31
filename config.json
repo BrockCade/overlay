@@ -1,0 +1,12 @@
+{
+  "position": {
+    "x": -280,
+    "y": 0
+  },
+  "size": {
+    "width": 280,
+    "height": 231
+  },
+  "custom_text": "\"The only way to do great work is to love what you do.\"\n- Steve Jobs",
+  "refresh_interval_seconds": 2
+}
