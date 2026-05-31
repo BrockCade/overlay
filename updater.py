@@ -1,9 +1,46 @@
 import os
 import sys
+import json
+import base64
 import subprocess
-import urllib.request
-import urllib.error
 from pathlib import Path
+
+
+_GH_PATH = None
+
+
+def _find_gh():
+    candidates = [
+        "gh.exe",
+        r"C:\Program Files\GitHub CLI\gh.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\GitHubCLI\gh.exe"),
+    ]
+    for c in candidates:
+        try:
+            r = subprocess.run([c, "--version"], capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                return c
+        except FileNotFoundError:
+            continue
+    return None
+
+
+def _gh(args):
+    global _GH_PATH
+    if _GH_PATH is None:
+        _GH_PATH = _find_gh()
+        if _GH_PATH is None:
+            return None
+    try:
+        result = subprocess.run(
+            [_GH_PATH] + args,
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
 
 
 def get_current_version():
@@ -15,11 +52,12 @@ def get_current_version():
 
 
 def check_remote_version(owner, repo, branch="ai"):
-    url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/version.txt"
+    data = _gh(["api", f"repos/{owner}/{repo}/contents/version.txt?ref={branch}", "--jq", ".content"])
+    if data is None:
+        return None
     try:
-        with urllib.request.urlopen(url, timeout=5) as resp:
-            return resp.read().decode().strip()
-    except (urllib.error.URLError, urllib.error.HTTPError):
+        return base64.b64decode(data).decode().strip()
+    except Exception:
         return None
 
 
