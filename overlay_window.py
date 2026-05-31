@@ -51,7 +51,8 @@ def _x11_init():
 def _x11_display():
     global _X11_DISPLAY
     if _X11_DISPLAY is None and _x11_init():
-        _X11_DISPLAY = _X11.XOpenDisplay(None)
+        ptr = _X11.XOpenDisplay(None)
+        _X11_DISPLAY = ptr if ptr else None
     return _X11_DISPLAY
 
 
@@ -333,7 +334,7 @@ class OverlayWindow(QWidget):
         if not self.isVisible():
             return
         display = _x11_display()
-        if display is None:
+        if not display:
             return
         display_p = ctypes.c_void_p(display)
         raw_rects = self._content_rects()
