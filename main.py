@@ -76,6 +76,12 @@ def main():
     reload_act.triggered.connect(overlay.reload_config)
     menu.addAction(reload_act)
 
+    time_act = QAction("24-Hour Format")
+    time_act.setCheckable(True)
+    time_act.setChecked(overlay.time_format_24h)
+    time_act.triggered.connect(overlay.toggle_time_format)
+    menu.addAction(time_act)
+
     update_act = QAction("Check for Updates")
     update_act.triggered.connect(_check_updates)
     menu.addAction(update_act)

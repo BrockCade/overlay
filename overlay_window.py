@@ -30,6 +30,8 @@ class OverlayWindow(QWidget):
         self.config_path = config_path
         self.config = self._load_config()
 
+        self.time_format_24h = self.config.get("time_format_24h", False)
+
         self._resizing = 0
         self._moving = False
         self._drag_start = None
@@ -67,6 +69,8 @@ class OverlayWindow(QWidget):
 
     def reload_config(self):
         self.config = self._load_config()
+        self.time_format_24h = self.config.get("time_format_24h", False)
+        self._update_clock()
         self._update_custom_text()
         interval = max(1, self.config.get("refresh_interval_seconds", 2)) * 1000
         self.stats_timer.setInterval(interval)
@@ -181,7 +185,10 @@ class OverlayWindow(QWidget):
 
     def _update_clock(self):
         now = datetime.datetime.now()
-        self.time_label.setText(now.strftime("%I:%M:%S %p").lstrip("0"))
+        if self.time_format_24h:
+            self.time_label.setText(now.strftime("%H:%M:%S"))
+        else:
+            self.time_label.setText(now.strftime("%I:%M:%S %p").lstrip("0"))
         self.date_label.setText(now.strftime("%A, %B %d, %Y"))
 
     def _update_stats(self):
@@ -199,6 +206,11 @@ class OverlayWindow(QWidget):
 
     def _update_custom_text(self):
         self.quote_label.setText(self.config.get("custom_text", ""))
+
+    def toggle_time_format(self, *args):
+        self.time_format_24h = not self.time_format_24h
+        self._update_clock()
+        self._save_config()
 
     def _resize_edge(self, pos):
         rect = self.rect()

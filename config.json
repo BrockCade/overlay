@@ -8,5 +8,6 @@
     "height": 231
   },
   "custom_text": "\"The only way to do great work is to love what you do.\"\n- Steve Jobs",
+  "time_format_24h": false,
   "refresh_interval_seconds": 2
 }
