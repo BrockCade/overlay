@@ -66,19 +66,25 @@ def apply_update(target_dir=None):
         target_dir = Path(__file__).resolve().parent
 
     try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            capture_output=True, text=True, timeout=10,
-            cwd=target_dir
-        )
-        if result.stdout.strip():
-            return {"success": False, "error": "uncommitted_changes"}
-
         subprocess.run(["git", "fetch", "origin"], check=True, timeout=30, cwd=target_dir)
+
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True, text=True, timeout=10, cwd=target_dir
+        )
+        has_uncommitted = bool(status.stdout.strip())
+
+        if has_uncommitted:
+            subprocess.run(["git", "stash", "push", "-m", "auto-stash before update"],
+                           check=True, timeout=10, cwd=target_dir)
+
         subprocess.run(
             ["git", "pull", "--ff-only", "origin", "ai"],
             check=True, timeout=30, cwd=target_dir
         )
+
+        if has_uncommitted:
+            subprocess.run(["git", "stash", "pop"], check=False, timeout=10, cwd=target_dir)
 
         version_file = Path(target_dir) / "version.txt"
         new_version = version_file.read_text().strip() if version_file.exists() else "?"
