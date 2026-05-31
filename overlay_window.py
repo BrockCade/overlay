@@ -2,9 +2,9 @@ import json
 import datetime
 from pathlib import Path
 import psutil
-from PySide6.QtCore import Qt, QTimer, QRect
+from PySide6.QtCore import Qt, QTimer, QRect, QSize
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QProgressBar, QHBoxLayout
-from PySide6.QtGui import QPainter, QColor, QPen
+from PySide6.QtGui import QPainter, QColor, QPen, QImage
 
 
 class OverlayWindow(QWidget):
@@ -271,12 +271,33 @@ class OverlayWindow(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 6, 6)
 
+    def _hit_content(self, pos):
+        for w in self.findChildren(QLabel) + self.findChildren(QProgressBar):
+            rect = w.geometry()
+            if not rect.contains(pos):
+                continue
+            if isinstance(w, QProgressBar):
+                return True
+            text = w.text().strip()
+            if not text:
+                continue
+            br = w.fontMetrics().boundingRect(text)
+            if br.width() < rect.width():
+                if w.alignment() & Qt.AlignmentFlag.AlignCenter:
+                    br.moveCenter(rect.center())
+                else:
+                    br.moveTopLeft(rect.topLeft())
+                if br.contains(pos):
+                    return True
+            else:
+                return True
+        return False
+
     def mousePressEvent(self, event):
-        child = self.childAt(event.position().toPoint())
-        if child is None or child is self:
-            event.ignore()
-            return
         if event.button() == Qt.MouseButton.LeftButton:
+            if not self._hit_content(event.position().toPoint()):
+                event.ignore()
+                return
             edge = self._resize_edge(event.position().toPoint())
             if edge:
                 self._resizing = edge
