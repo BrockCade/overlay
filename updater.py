@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import base64
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -10,18 +11,22 @@ _GH_PATH = None
 
 
 def _find_gh():
+    gh = shutil.which("gh")
+    if gh:
+        return gh
     candidates = [
-        "gh.exe",
-        r"C:\Program Files\GitHub CLI\gh.exe",
-        os.path.expandvars(r"%LOCALAPPDATA%\GitHubCLI\gh.exe"),
+        "/usr/bin/gh",
+        "/usr/local/bin/gh",
+        "/home/linuxbrew/.linuxbrew/bin/gh",
     ]
     for c in candidates:
-        try:
-            r = subprocess.run([c, "--version"], capture_output=True, text=True, timeout=5)
-            if r.returncode == 0:
-                return c
-        except FileNotFoundError:
-            continue
+        if os.path.isfile(c):
+            try:
+                r = subprocess.run([c, "--version"], capture_output=True, text=True, timeout=5)
+                if r.returncode == 0:
+                    return c
+            except FileNotFoundError:
+                continue
     return None
 
 

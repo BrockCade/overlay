@@ -76,7 +76,7 @@ class OverlayWindow(QWidget):
         self.stats_timer.setInterval(interval)
 
     def _setup_ui(self):
-        font_family = self.config.get("font_family", "Segoe UI")
+        font_family = self.config.get("font_family", "sans-serif")
         layout = QVBoxLayout()
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(6)
