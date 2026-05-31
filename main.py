@@ -1,9 +1,26 @@
 import sys
 import os
+import subprocess
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QMessageBox
 from PySide6.QtGui import QIcon, QPainter, QColor, QPixmap, QAction
 from PySide6.QtCore import Qt
 from overlay_window import OverlayWindow
+
+
+def _detach():
+    if sys.platform == "win32":
+        if "pythonw.exe" not in sys.executable.lower():
+            subprocess.Popen([sys.executable.replace("python.exe", "pythonw.exe"), *sys.argv])
+            sys.exit(0)
+    else:
+        pid = os.fork()
+        if pid > 0:
+            sys.exit(0)
+        os.setsid()
+        devnull = os.open(os.devnull, os.O_RDWR)
+        os.dup2(devnull, 0)
+        os.dup2(devnull, 1)
+        os.dup2(devnull, 2)
 
 
 def _make_icon():
@@ -99,4 +116,7 @@ def main():
 
 
 if __name__ == "__main__":
+    if "--detach" in sys.argv:
+        sys.argv.remove("--detach")
+        _detach()
     main()
