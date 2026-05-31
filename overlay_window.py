@@ -1,6 +1,9 @@
 import json
 import datetime
 import ctypes
+import subprocess
+import sys
+import re
 from ctypes import c_int, c_short, c_ushort, c_void_p, POINTER, Structure
 from pathlib import Path
 import psutil
@@ -54,6 +57,23 @@ def _x11_display():
         ptr = _X11.XOpenDisplay(None)
         _X11_DISPLAY = ptr if ptr else None
     return _X11_DISPLAY
+
+
+def _read_windows_temp():
+    try:
+        out = subprocess.check_output(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature).CurrentTemperature"],
+            timeout=5, text=True, stderr=subprocess.DEVNULL
+        ).strip()
+        if out:
+            match = re.search(r"\d+", out)
+            if match:
+                temp_k = int(match.group()) / 10.0
+                return temp_k - 273.15
+    except Exception:
+        pass
+    return None
 
 
 class OverlayWindow(QWidget):
@@ -271,20 +291,23 @@ class OverlayWindow(QWidget):
             pass
 
         try:
-            temps = psutil.sensors_temperatures()
-            if temps:
-                cpu_keys = ["coretemp", "cpu_thermal", "k10temp", "cpu"]
-                best = None
-                for key in cpu_keys:
-                    if key in temps and temps[key]:
-                        best = max(best or 0, temps[key][0].current)
-                if best is None:
-                    for entries in temps.values():
-                        if entries:
-                            best = max(best or 0, entries[0].current)
-                if best is not None:
-                    self.temp_bar.setValue(min(int(best), 100))
-                    self.temp_value.setText(f"{best:.0f}°C")
+            best = None
+            if sys.platform == "win32":
+                best = _read_windows_temp()
+            else:
+                temps = psutil.sensors_temperatures()
+                if temps:
+                    cpu_keys = ["coretemp", "cpu_thermal", "k10temp", "cpu"]
+                    for key in cpu_keys:
+                        if key in temps and temps[key]:
+                            best = max(best or 0, temps[key][0].current)
+                    if best is None:
+                        for entries in temps.values():
+                            if entries:
+                                best = max(best or 0, entries[0].current)
+            if best is not None:
+                self.temp_bar.setValue(min(int(best), 100))
+                self.temp_value.setText(f"{best:.0f}°C")
         except Exception:
             pass
 
