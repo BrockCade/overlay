@@ -48,7 +48,6 @@ def _check_updates():
             restart_app()
         else:
             msg = {
-                "uncommitted_changes": "You have unsaved changes. Commit or stash them first.",
                 "git_not_found": "Git is not installed on this system.",
             }.get(result["error"], f"Update failed: {result['error']}")
             QMessageBox.warning(None, "Update Failed", msg)
