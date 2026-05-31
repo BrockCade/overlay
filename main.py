@@ -1,6 +1,6 @@
 import sys
 import os
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QMessageBox
 from PySide6.QtGui import QIcon, QPainter, QColor, QPixmap, QAction
 from PySide6.QtCore import Qt
 from overlay_window import OverlayWindow
@@ -16,6 +16,42 @@ def _make_icon():
     p.drawEllipse(1, 1, 18, 18)
     p.end()
     return QIcon(pm)
+
+
+def _check_updates():
+    from updater import get_current_version, check_remote_version, apply_update, restart_app
+
+    current = get_current_version()
+    remote = check_remote_version("BrockCade", "overlay")
+
+    if remote is None:
+        QMessageBox.information(None, "Update Check", "Could not reach GitHub. Check your internet connection.")
+        return
+
+    if remote == current:
+        QMessageBox.information(None, "Update Check", f"You're up to date (v{current}).")
+        return
+
+    reply = QMessageBox.question(
+        None, "Update Available",
+        f"Version v{remote} available (current: v{current}).\nUpdate now?",
+        QMessageBox.Yes | QMessageBox.No
+    )
+
+    if reply == QMessageBox.Yes:
+        result = apply_update()
+        if result["success"]:
+            QMessageBox.information(
+                None, "Update Complete",
+                f"Updated to v{result.get('version', remote)}. Restarting..."
+            )
+            restart_app()
+        else:
+            msg = {
+                "uncommitted_changes": "You have unsaved changes. Commit or stash them first.",
+                "git_not_found": "Git is not installed on this system.",
+            }.get(result["error"], f"Update failed: {result['error']}")
+            QMessageBox.warning(None, "Update Failed", msg)
 
 
 def main():
@@ -40,6 +76,10 @@ def main():
     reload_act = QAction("Reload Config")
     reload_act.triggered.connect(overlay.reload_config)
     menu.addAction(reload_act)
+
+    update_act = QAction("Check for Updates")
+    update_act.triggered.connect(_check_updates)
+    menu.addAction(update_act)
 
     menu.addSeparator()
 
